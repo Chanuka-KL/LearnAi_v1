@@ -1,9 +1,40 @@
 import OpenAI from "openai";
 import dotenv from "dotenv";
+import fs from "fs";
+import axios from "axios";
 
 dotenv.config();
 
-global.chatHistory = global.chatHistory || []; // Persistent in-memory chat history
+const historyFile = "./chatHistory.json"; // Store chat history
+const models = {
+    chat: "gpt-4o",
+    coding: "code-davinci-002",
+    summarization: "text-davinci-003"
+};
+
+// Load past chats
+function loadHistory() {
+    try {
+        return JSON.parse(fs.readFileSync(historyFile, "utf8"));
+    } catch (error) {
+        return [];
+    }
+}
+
+// Save chat history
+function saveHistory(history) {
+    fs.writeFileSync(historyFile, JSON.stringify(history.slice(-20), null, 2)); // Keep last 20 messages
+}
+
+// Fetch live data (web search)
+async function fetchLiveData(query) {
+    try {
+        const response = await axios.get(`https://api.duckduckgo.com/?q=${query}&format=json`);
+        return response.data.AbstractText || null;
+    } catch (error) {
+        return null;
+    }
+}
 
 export default async function handler(req, res) {
     if (req.method !== "POST") {
@@ -22,34 +53,39 @@ export default async function handler(req, res) {
 
     try {
         const { message } = req.body;
-        if (!message) {
-            return res.status(400).json({ error: "Message is required" });
+        global.chatHistory = loadHistory(); // Load past messages
+
+        // Select model based on query type
+        const selectedModel = message.includes("code") ? models.coding : models.chat;
+
+        // Fetch live data if needed
+        let extraInfo = await fetchLiveData(message);
+        if (extraInfo) {
+            message += `\n\nAdditional info found: ${extraInfo}`;
         }
 
-        // Build chat history
-        const chatMessages = [
-            { role: "system", content: "You are an AI assistant." },
-            ...global.chatHistory.slice(-10), // Keep last 10 messages
-            { role: "user", content: message }
-        ];
-
         const response = await client.chat.completions.create({
-            messages: chatMessages,
-            model: "gpt-4o",
-            temperature: 0.7, // More controlled responses
-            max_tokens: 1024, // Prevents excessive output
-            top_p: 0.9 // Better randomness
+            messages: [
+                { role: "system", content: "You are SpecterAI, an expert hacker and tech assistant, giving detailed responses with examples." },
+                ...global.chatHistory, // Include chat history
+                { role: "user", content: message }
+            ],
+            model: selectedModel,
+            temperature: 0.8,
+            max_tokens: 4096,
+            top_p: 1
         });
 
         const botReply = response.choices[0].message.content;
-
-        // Store conversation in memory
+        
+        // Save new conversation
         global.chatHistory.push({ role: "user", content: message });
         global.chatHistory.push({ role: "assistant", content: botReply });
+        saveHistory(global.chatHistory);
 
-        res.status(200).json({ reply: botReply, history: global.chatHistory.slice(-10) });
+        res.status(200).json({ reply: botReply });
     } catch (err) {
-        console.error("AI Request Failed:", err);
-        res.status(500).json({ error: "AI request failed", details: err.message });
+        console.error(err);
+        res.status(500).json({ error: "AI request failed" });
     }
-}
+        }
