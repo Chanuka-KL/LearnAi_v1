@@ -1,18 +1,33 @@
 import OpenAI from "openai";
 import dotenv from "dotenv";
+import mongoose from "mongoose";
 
+// Load environment variables
 dotenv.config();
 
-// In-memory conversation history (short-term memory)
-let conversationHistory = [];
+// Connect to MongoDB
+const mongoUri = process.env.MONGODB_URI;
+mongoose.connect(mongoUri, { useNewUrlParser: true, useUnifiedTopology: true })
+    .then(() => console.log("MongoDB connected"))
+    .catch(err => console.error("MongoDB connection error:", err));
+
+// Define a schema for storing messages
+const messageSchema = new mongoose.Schema({
+    role: String,
+    content: String,
+    timestamp: { type: Date, default: Date.now }
+});
+
+// Create a model
+const Message = mongoose.model("Message", messageSchema);
 
 export default async function handler(req, res) {
-    // Allow all HTTP methods and set CORS headers
+    // CORS Headers
     res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-api-key");
 
-    // Handle preflight requests (CORS)
+    // Handle CORS preflight request
     if (req.method === "OPTIONS") {
         return res.status(200).end();
     }
@@ -23,6 +38,12 @@ export default async function handler(req, res) {
         return res.status(403).json({ error: "Unauthorized access" });
     }
 
+    // Handle GET request (Check API Status)
+    if (req.method === "GET") {
+        return res.status(200).json({ message: "AI API is running", status: "Active" });
+    }
+
+    // Get the OpenAI API key
     const token = process.env.GITHUB_TOKEN;
     if (!token) {
         return res.status(500).json({ error: "Missing API token" });
@@ -34,25 +55,22 @@ export default async function handler(req, res) {
     });
 
     try {
-        // Handle GET request (API status check)
-        if (req.method === "GET") {
-            return res.status(200).json({ message: "AI API is running", status: "Active" });
-        }
-
-        // Extract user input for other methods (POST, PUT, DELETE)
         const { message, temperature = 1, max_tokens = 4096 } = req.body;
 
         if (!message) {
             return res.status(400).json({ error: "Missing 'message' in request" });
         }
 
-        // Store user input in memory
-        conversationHistory.push({ role: "user", content: message });
+        // Store user message in MongoDB
+        await Message.create({ role: "user", content: message });
+
+        // Retrieve last 5 messages from MongoDB
+        const lastMessages = await Message.find().sort({ timestamp: -1 }).limit(5).lean();
 
         const response = await client.chat.completions.create({
             messages: [
                 { role: "system", content: "You are a smart AI assistant." },
-                ...conversationHistory.slice(-5) // Keep last 5 messages
+                ...lastMessages.reverse() // Ensure chronological order
             ],
             model: "gpt-4o",
             temperature,
@@ -62,8 +80,8 @@ export default async function handler(req, res) {
 
         const aiReply = response.choices[0].message.content;
 
-        // Store AI response in memory
-        conversationHistory.push({ role: "assistant", content: aiReply });
+        // Store AI response in MongoDB
+        await Message.create({ role: "assistant", content: aiReply });
 
         console.log(`[LOG] User: ${message}`);
         console.log(`[LOG] AI: ${aiReply}`);
@@ -74,14 +92,4 @@ export default async function handler(req, res) {
         console.error("[ERROR]", err);
         return res.status(500).json({ error: "AI request failed", details: err.message });
     }
-}
-
-
-export default async function handler(req, res) {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-api-key");
-
-    if (req.method === "OPTIONS") {
-        return res.status(200).end(); // Handle CORS preflight
-    }
+                }
