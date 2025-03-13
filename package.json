@@ -1,15 +1,19 @@
 {
-  "name": "advanced-ai-assistant",
+  "name": "specter-ai",
   "version": "1.0.0",
-  "description": "An AI assistant running on Vercel",
-  "main": "api/chat.js",
+  "description": "An advanced AI chatbot with memory and external data fetching.",
+  "main": "chat.js",
   "scripts": {
-    "start": "node api/chat.js"
+    "start": "node chat.js",
+    "dev": "vercel dev",
+    "deploy": "vercel --prod"
   },
   "dependencies": {
     "openai": "^4.0.0",
     "dotenv": "^16.0.3",
-    "fs": "latest",
-    "axios": "^1.4.0"
+    "axios": "^1.5.0"
+  },
+  "devDependencies": {
+    "vercel": "^30.0.0"
   }
 }
