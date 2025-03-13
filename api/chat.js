@@ -1,32 +1,17 @@
 import OpenAI from "openai";
 import dotenv from "dotenv";
-import fs from "fs";
 import axios from "axios";
 
 dotenv.config();
 
-const historyFile = "./chatHistory.json"; // Store chat history
 const models = {
     chat: "gpt-4o",
     coding: "code-davinci-002",
     summarization: "text-davinci-003"
 };
 
-// Load past chats
-function loadHistory() {
-    try {
-        return JSON.parse(fs.readFileSync(historyFile, "utf8"));
-    } catch (error) {
-        return [];
-    }
-}
+let chatHistory = []; // In-memory chat history (temporary)
 
-// Save chat history
-function saveHistory(history) {
-    fs.writeFileSync(historyFile, JSON.stringify(history.slice(-20), null, 2)); // Keep last 20 messages
-}
-
-// Fetch live data (web search)
 async function fetchLiveData(query) {
     try {
         const response = await axios.get(`https://api.duckduckgo.com/?q=${query}&format=json`);
@@ -52,13 +37,10 @@ export default async function handler(req, res) {
     });
 
     try {
-        const { message } = req.body;
-        global.chatHistory = loadHistory(); // Load past messages
+        let { message } = req.body;
 
-        // Select model based on query type
         const selectedModel = message.includes("code") ? models.coding : models.chat;
 
-        // Fetch live data if needed
         let extraInfo = await fetchLiveData(message);
         if (extraInfo) {
             message += `\n\nAdditional info found: ${extraInfo}`;
@@ -66,8 +48,8 @@ export default async function handler(req, res) {
 
         const response = await client.chat.completions.create({
             messages: [
-                { role: "system", content: "You are SpecterAI, an expert hacker and tech assistant, giving detailed responses with examples." },
-                ...global.chatHistory, // Include chat history
+                { role: "system", content: "You are SpecterAI, a hacking and tech expert." },
+                ...chatHistory.slice(-10), // Keep last 10 messages in memory
                 { role: "user", content: message }
             ],
             model: selectedModel,
@@ -77,15 +59,13 @@ export default async function handler(req, res) {
         });
 
         const botReply = response.choices[0].message.content;
-        
-        // Save new conversation
-        global.chatHistory.push({ role: "user", content: message });
-        global.chatHistory.push({ role: "assistant", content: botReply });
-        saveHistory(global.chatHistory);
+
+        chatHistory.push({ role: "user", content: message });
+        chatHistory.push({ role: "assistant", content: botReply });
 
         res.status(200).json({ reply: botReply });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: "AI request failed" });
     }
-        }
+                }
