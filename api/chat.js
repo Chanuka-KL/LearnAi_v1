@@ -1,41 +1,55 @@
-import fs from "fs";
-import path from "path";
+import OpenAI from "openai";
+import dotenv from "dotenv";
 
-const memoryFile = path.join(process.cwd(), "chat_memory.json");
+dotenv.config();
 
-// Load past messages
-function loadMemory() {
-    if (fs.existsSync(memoryFile)) {
-        return JSON.parse(fs.readFileSync(memoryFile));
-    }
-    return [];
-}
+global.chatHistory = global.chatHistory || []; // Persistent in-memory chat history
 
-// Save messages (limit to last 10 messages)
-function saveMessage(user, bot) {
-    let memory = loadMemory();
-    memory.push({ user, bot });
-    if (memory.length > 10) memory.shift(); // Keep only the last 10 messages
-    fs.writeFileSync(memoryFile, JSON.stringify(memory, null, 2));
-}
-
-// Chat API
 export default async function handler(req, res) {
     if (req.method !== "POST") {
-        return res.status(405).json({ error: "Method Not Allowed" });
+        return res.status(405).json({ error: "Only POST requests allowed" });
     }
 
-    const { message } = req.body;
-    if (!message) {
-        return res.status(400).json({ error: "Message is required" });
+    const token = process.env.GITHUB_TOKEN;
+    if (!token) {
+        return res.status(500).json({ error: "Missing API token" });
     }
 
-    const memory = loadMemory(); // Load past chats
+    const client = new OpenAI({
+        baseURL: "https://models.inference.ai.azure.com",
+        apiKey: token
+    });
 
-    // AI logic (modify this to connect with your model)
-    const botReply = `AI remembers: ${memory.length} messages. Your message: ${message}`;
+    try {
+        const { message } = req.body;
+        if (!message) {
+            return res.status(400).json({ error: "Message is required" });
+        }
 
-    saveMessage(message, botReply);
+        // Build chat history
+        const chatMessages = [
+            { role: "system", content: "You are an AI assistant." },
+            ...global.chatHistory.slice(-10), // Keep last 10 messages
+            { role: "user", content: message }
+        ];
 
-    res.json({ reply: botReply, history: memory });
+        const response = await client.chat.completions.create({
+            messages: chatMessages,
+            model: "gpt-4o",
+            temperature: 0.7, // More controlled responses
+            max_tokens: 1024, // Prevents excessive output
+            top_p: 0.9 // Better randomness
+        });
+
+        const botReply = response.choices[0].message.content;
+
+        // Store conversation in memory
+        global.chatHistory.push({ role: "user", content: message });
+        global.chatHistory.push({ role: "assistant", content: botReply });
+
+        res.status(200).json({ reply: botReply, history: global.chatHistory.slice(-10) });
+    } catch (err) {
+        console.error("AI Request Failed:", err);
+        res.status(500).json({ error: "AI request failed", details: err.message });
+    }
 }
