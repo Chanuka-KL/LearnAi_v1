@@ -7,3 +7,9 @@
     { "src": "/api/chat", "dest": "/api/chat.js" }
   ]
 }
+
+{
+  "rewrites": [
+    { "source": "/", "destination": "/public/index.html" }
+  ]
+}
