@@ -1,29 +1,20 @@
 import OpenAI from "openai";
 import dotenv from "dotenv";
-import axios from "axios";
 
 dotenv.config();
 
-const models = {
-    chat: "gpt-4o",
-    coding: "code-davinci-002",
-    summarization: "text-davinci-003"
-};
-
-let chatHistory = []; // In-memory chat history (temporary)
-
-async function fetchLiveData(query) {
-    try {
-        const response = await axios.get(`https://api.duckduckgo.com/?q=${query}&format=json`);
-        return response.data.AbstractText || null;
-    } catch (error) {
-        return null;
-    }
-}
+// In-memory conversation history (short-term memory)
+let conversationHistory = [];
 
 export default async function handler(req, res) {
     if (req.method !== "POST") {
         return res.status(405).json({ error: "Only POST requests allowed" });
+    }
+
+    // Security: Check API Key
+    const userApiKey = req.headers["x-api-key"];
+    if (!userApiKey || userApiKey !== process.env.SECRET_API_KEY) {
+        return res.status(403).json({ error: "Unauthorized access" });
     }
 
     const token = process.env.GITHUB_TOKEN;
@@ -37,35 +28,38 @@ export default async function handler(req, res) {
     });
 
     try {
-        let { message } = req.body;
+        const { message, temperature = 1, max_tokens = 4096 } = req.body;
 
-        const selectedModel = message.includes("code") ? models.coding : models.chat;
-
-        let extraInfo = await fetchLiveData(message);
-        if (extraInfo) {
-            message += `\n\nAdditional info found: ${extraInfo}`;
+        if (!message) {
+            return res.status(400).json({ error: "Missing 'message' in request" });
         }
+
+        // Store user input in memory
+        conversationHistory.push({ role: "user", content: message });
 
         const response = await client.chat.completions.create({
             messages: [
-                { role: "system", content: "You are SpecterAI, a hacking and tech expert." },
-                ...chatHistory.slice(-10), // Keep last 10 messages in memory
-                { role: "user", content: message }
+                { role: "system", content: "You are a smart AI assistant." },
+                ...conversationHistory.slice(-5) // Keep last 5 messages
             ],
-            model: selectedModel,
-            temperature: 0.8,
-            max_tokens: 4096,
+            model: "gpt-4o",
+            temperature,
+            max_tokens,
             top_p: 1
         });
 
-        const botReply = response.choices[0].message.content;
+        const aiReply = response.choices[0].message.content;
 
-        chatHistory.push({ role: "user", content: message });
-        chatHistory.push({ role: "assistant", content: botReply });
+        // Store AI response in memory
+        conversationHistory.push({ role: "assistant", content: aiReply });
 
-        res.status(200).json({ reply: botReply });
+        console.log(`[LOG] User: ${message}`);
+        console.log(`[LOG] AI: ${aiReply}`);
+
+        return res.status(200).json({ reply: aiReply });
+
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "AI request failed" });
+        console.error("[ERROR]", err);
+        return res.status(500).json({ error: "AI request failed", details: err.message });
     }
-            }
+}
