@@ -1,40 +1,41 @@
-import OpenAI from "openai";
-import dotenv from "dotenv";
+import fs from "fs";
+import path from "path";
 
-dotenv.config();
+const memoryFile = path.join(process.cwd(), "chat_memory.json");
 
+// Load past messages
+function loadMemory() {
+    if (fs.existsSync(memoryFile)) {
+        return JSON.parse(fs.readFileSync(memoryFile));
+    }
+    return [];
+}
+
+// Save messages (limit to last 10 messages)
+function saveMessage(user, bot) {
+    let memory = loadMemory();
+    memory.push({ user, bot });
+    if (memory.length > 10) memory.shift(); // Keep only the last 10 messages
+    fs.writeFileSync(memoryFile, JSON.stringify(memory, null, 2));
+}
+
+// Chat API
 export default async function handler(req, res) {
     if (req.method !== "POST") {
-        return res.status(405).json({ error: "Only POST requests allowed" });
+        return res.status(405).json({ error: "Method Not Allowed" });
     }
 
-    const token = process.env.GITHUB_TOKEN;
-    if (!token) {
-        return res.status(500).json({ error: "Missing API token" });
+    const { message } = req.body;
+    if (!message) {
+        return res.status(400).json({ error: "Message is required" });
     }
 
-    const client = new OpenAI({
-        baseURL: "https://models.inference.ai.azure.com",
-        apiKey: token
-    });
+    const memory = loadMemory(); // Load past chats
 
-    try {
-        const { message } = req.body;
+    // AI logic (modify this to connect with your model)
+    const botReply = `AI remembers: ${memory.length} messages. Your message: ${message}`;
 
-        const response = await client.chat.completions.create({
-            messages: [
-                { role: "system", content: "You are an AI assistant." },
-                { role: "user", content: message }
-            ],
-            model: "gpt-4o",
-            temperature: 1,
-            max_tokens: 4096,
-            top_p: 1
-        });
+    saveMessage(message, botReply);
 
-        res.status(200).json({ reply: response.choices[0].message.content });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "AI request failed" });
-    }
+    res.json({ reply: botReply, history: memory });
 }
