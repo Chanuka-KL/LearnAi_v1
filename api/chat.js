@@ -7,8 +7,14 @@ dotenv.config();
 let conversationHistory = [];
 
 export default async function handler(req, res) {
-    if (req.method !== "POST") {
-        return res.status(405).json({ error: "Only POST requests allowed" });
+    // Allow all HTTP methods and set CORS headers
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-api-key");
+
+    // Handle preflight requests (CORS)
+    if (req.method === "OPTIONS") {
+        return res.status(200).end();
     }
 
     // Security: Check API Key
@@ -28,6 +34,12 @@ export default async function handler(req, res) {
     });
 
     try {
+        // Handle GET request (API status check)
+        if (req.method === "GET") {
+            return res.status(200).json({ message: "AI API is running", status: "Active" });
+        }
+
+        // Extract user input for other methods (POST, PUT, DELETE)
         const { message, temperature = 1, max_tokens = 4096 } = req.body;
 
         if (!message) {
